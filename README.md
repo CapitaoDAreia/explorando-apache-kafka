@@ -166,7 +166,9 @@ As partições permitem que diferentes consumidores processem diferentes partes 
 Em Apache Kafka, as mensagens armazenadas em uma partição têm uma estrutura definida por 5 componentes:
 
 ##### Offset
-É um identificador único para cada mensagem dentro de uma partição. O offset é um número sequencial que começa em 0 e aumenta conforme novas mensagens são adicionadas. Ele é utilizado para garantir que as mensagens sejam lidas na ordem correta e para possibilitar a recuperação da posição de leitura em caso de falhas.
+É um identificador único para cada mensagem dentro de uma partição, onde cada partição tem sua sequência de offsets. É um número sequencial que começa em 0 e aumenta conforme novas mensagens são adicionadas. Ele é utilizado para garantir que as mensagens sejam lidas na ordem correta e para possibilitar a recuperação da posição de leitura em caso de falhas.
+![image](https://hackmd.io/_uploads/BJM73YyRR.png)
+
 
 ##### Chave (Opcional)
 A chave é um valor opcional que pode ser associado a uma mensagem. Ela é usada principalmente para garantir que mensagens com a mesma chave sejam direcionadas para a mesma partição. Além disso, pode ser usada para particionar dados de forma lógica, conforme as necessidades da aplicação.
@@ -263,22 +265,44 @@ O comportamento de ACK pode ser configurado através da propriedade acks no prod
 * Este modo é o mais seguro, mas também o mais lento, devido à espera pela confirmação de todas as réplicas.
 
 #### Consumidores
-Consumidores (ou consumers) são os componentes responsáveis por ler e processar mensagens de tópicos. Eles são recebem as mensagens que os produtores publicam. Aqui vão alguns aspectos importantes sobre os consumidores:
+Consumidores (ou consumers) são os componentes responsáveis por ler e processar mensagens de tópicos. Eles recebem as mensagens que os produtores publicam.
+
+Aqui vão alguns aspectos importantes sobre os consumidores:
+
+##### Grupos de Consumidores
+Consumidores podem ser organizados em grupos (consumer groups), que são conjuntos lógicos que representam as aplicações que consumirão as informações dos tópicos Kafka. Cada consumer group pode possuir 1 ou muitos consumidores, e os consumidores são, na prática, as aplicações.
+![image](https://hackmd.io/_uploads/ryUkS_kCA.png)
+
+* Cada partição de um tópico é atribuída a apenas um consumidor dentro do grupo, tal qual cada mensagem de uma partição só será consumida por um único consumidor em cada consumer group. Isso proporciona escalabilidade e paralelismo, pois diferentes consumidores podem processar diferentes partições em paralelo.
+* Se o número de consumidores for maior que o número de partições, alguns consumidores ficarão ociosos. Se houver menos consumidores que partições, alguns consumidores processarão mais de uma partição.
+* Consumer groups distintos podem receber a mesma mensagem.
+* Quando um consumer entra ou sai do grupo ocorre o evento de **Rebalance**.
+
 
 ##### Leitura de Mensagens
 Consumidores leem as mensagens de um ou mais tópicos. Eles podem se conectar ao Kafka e consumir dados continuamente, processando as mensagens à medida que são produzidas.
 
+Quando um consumidor se conecta a um tópico pela primeira vez, existe a opção de configurar uma propriedade chamada **Auto Offset Reset**. Essa propriedade tem dois valores, que são e determinam respectivamente:
+* **EARLIEST**: Determina que, se um consumidor recém-conectado não tiver um offset commitado (ou seja, ele nunca processou mensagens desse tópico anteriormente), ele irá processar todas as mensagens a partir do menor offset disponível na partição.
+* **LATEST**: Determina que, se um consumidor recém-conectado não tiver um offset commitado, ele irá começar a processar somente novas mensagens que forem adicionadas ao tópico a partir do momento da conexão.
+
+Além disso, o Kafka oferece mecanismos para lidar com falhas temporárias ou erros durante o processamento das mensagens.
+
+Um dos mecanismos é o retry, onde consumidores podem tentar processar novamente mensagens que falharam, com a lógica de retry podendo ser implementada manualmente ou por frameworks de processamento.
+
+Outro recurso importante é o seek, que permite ao consumidor se reposicionar em um offset específico dentro de uma partição, possibilitando, por exemplo, reprocessar mensagens desde um determinado ponto ou saltar mensagens que já foram tratadas.
+
 ##### Offset
 Cada mensagem em uma partição de um tópico possui um número de offset (já mencionado anteriormente), que é uma espécie de identificador exclusivo da posição da mensagem dentro da partição. O offset permite que os consumidores saibam quais mensagens já foram lidas e quais ainda precisam ser processadas. Consumidores podem controlar seus próprios offsets, permitindo retomar a leitura a partir de uma posição específica em caso de falhas.
 
-##### Grupos de Consumidores
-Consumidores podem ser organizados em grupos de consumidores (consumer groups). Um grupo de consumidores permite que múltiplos consumidores compartilhem a carga de processamento de um tópico:
-* Cada partição de um tópico é atribuída a apenas um consumidor dentro do grupo.
-* Isso proporciona escalabilidade e paralelismo, pois diferentes consumidores podem processar diferentes partições em paralelo.
-* Se o número de consumidores for maior que o número de partições, alguns consumidores ficarão ociosos. Se houver menos consumidores que partições, alguns consumidores processarão mais de uma partição.
+Os consumidores de um consumer group compartilham o controle dos offsets de cada partição atribuída ao grupo. Isso significa que, para cada partição, há um único offset comprometido, o que evita que múltiplos consumidores dentro do mesmo grupo leiam a mesma mensagem.
+
+O Apache Kafka utiliza um tópico interno para armazenar os commits de offset de cada consumer group, o nome desse tópico é `__consumer_offsets`. Este tópico `__consumer_offsets` é criado automaticamente pelo Kafka e é usado para armazenar os offsets consumidos por cada grupo de consumidores (consumer group). Sempre que um consumidor faz o commit de um offset (ou seja, confirma que processou até certo ponto em uma partição), essa informação é gravada nesse tópico interno.
 
 ##### Processamento Paralelo
 O Kafka permite que diferentes consumidores processem partições separadas em paralelo. Isso maximiza o throughput de leitura e processamento de dados, escalando o sistema com base no número de partições.
+
+Além disso, vale a pena mencionar que cada thread de um mesmo consumidor pode se inscrever em apenas uma única partição. Além disso, cada thread pode estar em apenas um único consumer group.
 
 ##### Polling
 Diferente de sistemas que enviam as mensagens diretamente aos consumidores, no Kafka o consumidor faz a leitura das mensagens ativamente, através de um processo chamado **polling**. Isso significa que o consumidor, periodicamente, faz uma requisição ao broker do Kafka para obter novas mensagens. Isso dá mais controle ao consumidor sobre quando e como ele processa as mensagens.
@@ -286,16 +310,20 @@ Diferente de sistemas que enviam as mensagens diretamente aos consumidores, no K
 ##### Commit de Offsets
 Os consumidores têm a responsabilidade de confirmar (ou fazer o commit) dos offsets das mensagens que processaram. Isso informa ao Kafka que o consumidor já leu as mensagens até um determinado ponto, e essa posição é armazenada de forma persistente para garantir que, em caso de falhas ou reinicialização, o consumidor não leia as mesmas mensagens novamente.
 
-##### Sem Estado e Com Estado
-Um consumidor pode trabalhar sem estado, onde apenas consome as mensagens e toma ações imediatas sem manter contexto anterior. Alternativamente, um consumidor pode trabalhar com estado, armazenando dados de sessão ou contexto à medida que lê as mensagens e toma decisões com base nas informações acumuladas.
+Veja um exemplo ilustrado na imagem abaixo:
+![image](https://hackmd.io/_uploads/ByHfCYJCC.png)
+* **Consumer Group A**:
+    * O **consumer A** processou as mensagens da **partição 0** do **tópico A** até o **offset 200**. Isso significa que este consumer group já leu e processou até essa posição específica na partição.
+* **Consumer Group B**:
+    * O **consumer B** processou a mesma **partição 0** do **tópico A**, mas apenas até o **offset 2**. Este grupo está atrasado em relação ao **consumer A** e ainda precisa processar mensagens a partir do **offset 3**.
+* **Independência de offsets**: Cada consumer group possui seu próprio conjunto de offsets, então o progresso do **consumer A** até o **offset 200** não afeta o progresso do **consumer B**, que está no **offset 2**.
+* **Mensagens duplicadas?**: Embora ambos os grupos estejam consumindo a mesma partição, eles processam as mensagens de maneira independente. Portanto, a mensagem com **offset 2** foi processada por ambos, mas para diferentes propósitos. Não há problema nisso, pois consumer groups distintos geralmente têm diferentes tarefas a realizar com as mesmas mensagens.
 
-##### Modos de Processamento
+###### Auto Commit
+É possível configurar seu consumidor para fazer o auto commit. Dessa forma, toda mensagem que você receber será automaticamente comitada. Mas lembre-se que com esse cenário você poderá perder mensagens, portanto, é uma boa estratégia quando existe a possibilidade de perder mensagens.
 
-###### Consumidores Individuais
-* Um único consumidor pode consumir todas as mensagens de todas as partições de um tópico. Este modelo é simples, mas não escala bem com grandes volumes de dados.
-
-###### Grupos de Consumidores
-* Este é o modelo mais comum, onde vários consumidores em um grupo de consumidores compartilham o processamento das partições de um tópico. Cada partição é atribuída a um único consumidor, garantindo que cada mensagem seja processada apenas uma vez.
+###### Commit Manual
+Em 99% dos casos, é a estratégia de commit mais adequada. Neste cenário é possível escolher quanto o commit será realizado, o que geralmente é feito após o processamento.
 
 ##### Garantias de Entrega
 
@@ -315,4 +343,14 @@ Já embute a idempotência automaticamente, sendo a opção mais robusta para ev
 
 >Idempotência é um conceito da matemática e da ciência da computação que se refere a uma operação que, quando aplicada várias vezes, produz o mesmo resultado que quando aplicada uma única vez. Em outras palavras, uma operação idempotente não tem efeitos colaterais adicionais quando repetida.
 
+##### Sem Estado e Com Estado
+Um consumidor pode trabalhar sem estado, onde apenas consome as mensagens e toma ações imediatas sem manter contexto anterior. Alternativamente, um consumidor pode trabalhar com estado, armazenando dados de sessão ou contexto à medida que lê as mensagens e toma decisões com base nas informações acumuladas.
+
+##### Modos de Processamento
+
+###### Consumidores Individuais
+* Um único consumidor pode consumir todas as mensagens de todas as partições de um tópico. Este modelo é simples, mas não escala bem com grandes volumes de dados.
+
+###### Grupos de Consumidores
+* Este é o modelo mais comum, onde vários consumidores em um grupo de consumidores compartilham o processamento das partições de um tópico. Cada partição é atribuída a um único consumidor, garantindo que cada mensagem seja processada apenas uma vez.
 

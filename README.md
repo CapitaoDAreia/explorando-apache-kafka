@@ -354,3 +354,37 @@ Um consumidor pode trabalhar sem estado, onde apenas consome as mensagens e toma
 ###### Grupos de Consumidores
 * Este é o modelo mais comum, onde vários consumidores em um grupo de consumidores compartilham o processamento das partições de um tópico. Cada partição é atribuída a um único consumidor, garantindo que cada mensagem seja processada apenas uma vez.
 
+### Rebalance
+O Rebalance é o processo de redistribuição das partições de um tópico entre os consumidores de um consumer group. Ele acontece quando um consumidor entra ou sai do grupo, quando um consumidor fica ocioso por muito tempo ou quando novas partições são adicionadas a um tópico. O objetivo é garantir que o workload esteja balanceado entre os consumidores, mas esse processo nem sempre é desejável.
+
+#### Por Que Evitar Rebalance?
+O rebalance pode ser um grande vilão quando ocorre com frequência. Alguns dos motivos:
+
+* **Aumenta a latência**: Em clusters grandes, esse processo pode ser lento, demorando de alguns minutos a até horas, dependendo do caso.
+* **Causa queda na vazão (throughput)**: Como os consumidores param de processar enquanto redistribuem as partições, a performance geral cai.
+* **Consome recursos**: O rebalance exige mais CPU, memória e rede, impactando o desempenho geral da aplicação.
+* **Risco de duplicação ou perda de dados**: Durante o rebalance, podem ocorrer reprocessamentos de mensagens ou, no pior cenário, até perda de dados.
+
+#### Como Evitar Rebalance?
+Algumas boas práticas para minimizar o rebalance:
+
+* **Evite auto-scaling desenfreado**: Adicionar ou remover instâncias de consumidores automaticamente pode causar rebalances constantes. Se precisar escalar, faça isso em horários de baixa carga.
+* **Cuidado ao adicionar partições**: Evitar mexer em tópicos existentes ao adicionar novas partições também ajuda a prevenir rebalances.
+* **Reduza o tempo de processamento por mensagem**: Consumidores que demoram muito para processar mensagens podem ficar ociosos e desencadear rebalances.
+* **Escolha a estratégia de particionamento correta**: Escolher uma boa estratégia de particionamento pode diminuir o impacto de rebalances inevitáveis.
+
+##### Estratégias de Particionamento
+Quando um consumidor entra ou sai de um consumer group, o Kafka precisa redistribuir as partições entre os consumidores restantes. Esse processo causa o chamado *"stop-the-world"*, onde todos os consumidores do grupo param temporariamente de processar mensagens até que a redistribuição esteja completa. Isso acontece porque o Kafka precisa garantir que cada partição seja atribuída a apenas um consumidor dentro do grupo, evitando conflitos de processamento simultâneo.
+
+Embora este fenômeno seja inevitável em muitos casos, podemos minimizar seu impacto ao escolher a estratégia de particionamento adequada. Vejamos algumas fazer isso:
+
+* **Range**: Consumidores e partições são ordenados lexicograficamente (C1, C2, C3 e partições A0, B0, A1, B1). Cada consumidor recebe um conjunto contínuo de partições. Isso é útil quando você quer que determinados dados fiquem no mesmo consumidor (colocation).
+
+* **Round Robin**: As partições são distribuídas de maneira circular entre os consumidores, balanceando a carga igualmente. No entanto, essa abordagem não minimiza o número de movimentos durante o rebalance.
+
+* **Sticky**: Funciona como o Round Robin, mas quando um consumidor sai do grupo, apenas suas partições são redistribuídas, o que reduz o número de movimentos no rebalance, ajudando a manter a estabilidade.
+
+##### Static Group Membership
+Uma forma eficiente de reduzir (ou até evitar) rebalances é usar o conceito de **Static Group Membership**. Com essa técnica, cada consumidor tem um ID estático (`group.instance.id`), e as partições são "fixadas" a ele.
+
+Quando o consumidor entra ou sai do grupo, suas partições continuam com ele, evitando o rebalance completo. Contudo, se o consumidor permanecer inativo além do tempo limite de sessão (`session timeout`, por padrão 5 minutos), o rebalance pode ocorrer.

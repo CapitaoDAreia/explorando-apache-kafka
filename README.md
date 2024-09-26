@@ -190,6 +190,13 @@ Kafka armazena um timestamp para cada mensagem, que indica o momento em que a me
 Se uma mensagem tem uma key definida, Kafka usa essa chave para determinar a partição. O processo é geralmente o seguinte:
 
 * Kafka aplica uma função hash à chave da mensagem.
+  * O Kafka usa a estratégia de hash **murmur2** para gerar a chave de hash. Com a chave de hash gerada, ele executa uma função de módulo com o número de partições para o tópico do Kafka. Fica mais ou menos assim:
+      ``` 
+      murmur2("101") % 4 = partition 0
+      murmur2("102") % 4 = partition 1
+      murmur2("103") % 4 = partition 2
+      murmur2("104") % 4 = partition 3
+      ```
 * O resultado do hash é dividido pelo número de partições disponíveis para o tópico.
 * O restante da divisão (módulo) é o número da partição em que a mensagem será armazenada.
 
@@ -313,9 +320,9 @@ Os consumidores têm a responsabilidade de confirmar (ou fazer o commit) dos off
 Veja um exemplo ilustrado na imagem abaixo:
 ![image](https://hackmd.io/_uploads/ByHfCYJCC.png)
 * **Consumer Group A**:
-    * O **consumer A** processou as mensagens da **partição 0** do **tópico A** até o **offset 200**. Isso significa que este consumer group já leu e processou até essa posição específica na partição.
+  * O **consumer A** processou as mensagens da **partição 0** do **tópico A** até o **offset 200**. Isso significa que este consumer group já leu e processou até essa posição específica na partição.
 * **Consumer Group B**:
-    * O **consumer B** processou a mesma **partição 0** do **tópico A**, mas apenas até o **offset 2**. Este grupo está atrasado em relação ao **consumer A** e ainda precisa processar mensagens a partir do **offset 3**.
+  * O **consumer B** processou a mesma **partição 0** do **tópico A**, mas apenas até o **offset 2**. Este grupo está atrasado em relação ao **consumer A** e ainda precisa processar mensagens a partir do **offset 3**.
 * **Independência de offsets**: Cada consumer group possui seu próprio conjunto de offsets, então o progresso do **consumer A** até o **offset 200** não afeta o progresso do **consumer B**, que está no **offset 2**.
 * **Mensagens duplicadas?**: Embora ambos os grupos estejam consumindo a mesma partição, eles processam as mensagens de maneira independente. Portanto, a mensagem com **offset 2** foi processada por ambos, mas para diferentes propósitos. Não há problema nisso, pois consumer groups distintos geralmente têm diferentes tarefas a realizar com as mesmas mensagens.
 
@@ -325,23 +332,31 @@ Veja um exemplo ilustrado na imagem abaixo:
 ###### Commit Manual
 Em 99% dos casos, é a estratégia de commit mais adequada. Neste cenário é possível escolher quanto o commit será realizado, o que geralmente é feito após o processamento.
 
-##### Garantias de Entrega
+##### Garantias de Entrega e Estratégias de Produção de Mensagem
 
 ###### At-least-once
-O Kafka garante que cada mensagem será entregue ao consumidor pelo menos uma vez, o que significa que é possível que um consumidor receba mensagens duplicadas (devido a reinícios, falhas, etc.). O consumidor deve ser capaz de lidar com essa duplicidade, garantindo que o processamento final seja idempotente.
+Essa estratégia garante que uma mensagem será entregue ao menos uma vez. Ou seja, mesmo que ocorra uma falha no envio ou no processamento, o Kafka tentará reenviar a mensagem até que ela seja confirmada pelo consumidor.
+* Configuração do produtor: `acks=all` (ou `acks=-1`), o que significa que o Kafka espera a confirmação de todos os `min.insync.replicas` antes de considerar a mensagem como entregue.
+* Configuração de réplicas: O parâmetro `min.insync.replicas` define quantas réplicas devem estar disponíveis para garantir a entrega.
 
-Requer que o consumidor seja idempotente para lidar corretamente com as possíveis duplicações.
-###### At-most-once
-Se o consumidor se comprometer com o offset antes de processar a mensagem, ou seja, confirmar o recebimento antes de processar a mensagem, é possível que uma mensagem seja "perdida" caso o processamento falhe.
+Isso pode resultar em duplicações, por exemplo, se o consumidor processar a mensagem e falhar antes de confirmar o offset. Por isso, o consumidor deve ser capaz de lidar com duplicidades, geralmente implementando operações idempotentes para garantir que o processamento final não seja afetado por mensagens duplicadas.
 
-Não precisa de idempotência, pois, nesse cenário, uma mensagem pode ser "perdida" e não ser processada, mas nunca será processada mais de uma vez.
+
+###### At-most-once (fire and forget)
+Neste modo, o Kafka pode entregar a mensagem no máximo uma vez, sem a garantia de que ela será efetivamente processada, pois a confirmação ocorre antes do processamento.
+* Configuração do produtor: `acks=0`, ou seja, o produtor não espera qualquer confirmação de entrega dos brokers.
+* No consumidor, se o offset for confirmado (committed) antes do processamento, e houver falha, a mensagem será "perdida", pois o Kafka já a considera entregue.
+
+Isso significa que, neste modo, a mensagem pode não ser processada, mas nunca será processada mais de uma vez. Não há necessidade de idempotência no consumidor, pois ele não precisará lidar com duplicações.
 
 ###### Exactly-once
-Esse é o cenário mais seguro, onde a mensagem é processada exatamente uma vez. Ele pode ser alcançado com o uso de transações no Kafka, mas exige configurações adicionais e maior complexidade.
+Essa é a garantia mais forte oferecida pelo Kafka, onde cada mensagem é processada exatamente uma vez, evitando tanto duplicações quanto perda de mensagens.
+* Configuração do produtor: `enable.idempotence=true`, o que garante que o produtor possa reenviar mensagens sem gerar duplicações.
+* Adicionalmente, o Kafka permite o uso de transações (`transactional.id` no produtor), o que garante a entrega e o processamento da mensagem exatamente uma vez em cenários de falhas.
 
-Já embute a idempotência automaticamente, sendo a opção mais robusta para evitar duplicações sem a necessidade de implementar mecanismos adicionais no consumidor.
+Essa estratégia é a mais robusta e garante que nenhuma mensagem será perdida ou processada mais de uma vez, sem a necessidade de lidar com duplicações diretamente no consumidor. No entanto, exige configurações e maior complexidade de implementação no Kafka.
 
->Idempotência é um conceito da matemática e da ciência da computação que se refere a uma operação que, quando aplicada várias vezes, produz o mesmo resultado que quando aplicada uma única vez. Em outras palavras, uma operação idempotente não tem efeitos colaterais adicionais quando repetida.
+>Idempotência é um conceito da matemática e da ciência da computação que se refere a uma operação que pode ser aplicada múltiplas vezes sem alterar o resultado além da primeira aplicação. No contexto de processamento de mensagens, uma operação idempotente garante que, mesmo se a mesma mensagem for processada mais de uma vez, o resultado final não será impactado.
 
 ##### Sem Estado e Com Estado
 Um consumidor pode trabalhar sem estado, onde apenas consome as mensagens e toma ações imediatas sem manter contexto anterior. Alternativamente, um consumidor pode trabalhar com estado, armazenando dados de sessão ou contexto à medida que lê as mensagens e toma decisões com base nas informações acumuladas.
@@ -388,3 +403,4 @@ Embora este fenômeno seja inevitável em muitos casos, podemos minimizar seu im
 Uma forma eficiente de reduzir (ou até evitar) rebalances é usar o conceito de **Static Group Membership**. Com essa técnica, cada consumidor tem um ID estático (`group.instance.id`), e as partições são "fixadas" a ele.
 
 Quando o consumidor entra ou sai do grupo, suas partições continuam com ele, evitando o rebalance completo. Contudo, se o consumidor permanecer inativo além do tempo limite de sessão (`session timeout`, por padrão 5 minutos), o rebalance pode ocorrer.
+

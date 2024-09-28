@@ -5,6 +5,7 @@ Must Read:
 - [Apache Kafka Source Code](https://github.com/apache/kafka) - Apacha Kafka
 - [Quem é Franz Kafka](https://pt.wikipedia.org/wiki/Franz_Kafka) - Wikipédia
 - [Apache Kafka: O que é e como funciona?](https://blog.dp6.com.br/apache-kafka-o-que-%C3%A9-e-como-funciona-300a5736e388) - DP6 Team
+- [Schema Registry Overview](https://docs.confluent.io/platform/current/schema-registry/index.html) - Confluent
 
 ## Introdução
 

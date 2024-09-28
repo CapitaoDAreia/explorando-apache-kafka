@@ -404,3 +404,29 @@ Uma forma eficiente de reduzir (ou até evitar) rebalances é usar o conceito de
 
 Quando o consumidor entra ou sai do grupo, suas partições continuam com ele, evitando o rebalance completo. Contudo, se o consumidor permanecer inativo além do tempo limite de sessão (`session timeout`, por padrão 5 minutos), o rebalance pode ocorrer.
 
+## Schema Registry
+No contexto do Apacha Kafka, o **Schema Registry** é um componente externo que gerencia e valida os schemas (estruturas de dados) usados na produção e consumo de mensagens.
+
+É geralmente usado com mensagens serializadas em formatos como **Avro**, **Protobuf** ou **JSON**, que exigem um esquema para definir a estrutura dos dados (como os campos e seus tipos). O **Confluent Schema Registry** é uma implementação bastante comum, integrada ao Kafka.
+
+### Vantagens
+**Validação de Dados**: O Schema Registry garante que os dados enviados e recebidos sigam um formato específico (o schema), evitando erros ao consumir dados inválidos ou malformados.
+
+**Evolução de Esquemas**: O Schema Registry permite que os schemas evoluam sem quebrar os consumidores existentes. Ele gerencia versões dos schemas e impõe regras de compatibilidade, como:
+* **Backward Compatibility**: O novo schema é compatível com os dados produzidos pelo schema antigo.
+* **Forward Compatibility**: Os consumidores antigos podem processar dados produzidos com o novo schema.
+* **Full Compatibility**: Tanto os produtores quanto os consumidores podem ler dados, independentemente de usarem o schema antigo ou novo.
+
+**Eficiência**: Ao usar o Schema Registry, o schema não precisa ser enviado junto com cada mensagem. Apenas o ID do schema é anexado à mensagem, economizando espaço.
+
+### Schema Registry na Prática
+
+* **Produção da mensagem**
+  * O produtor serializa os dados de acordo com um schema (definido em Avro, Protobuf ou JSON).
+  * O schema é registrado no Schema Registry, se ainda não estiver registrado, e um ID único é atribuído a ele.
+  * O ID do schema é anexado à mensagem, que é então enviada ao Kafka.
+
+* **Consumo da mensagem**
+  * O consumidor lê a mensagem do Kafka.
+  * Extrai o ID do schema da mensagem e consulta o Schema Registry para obter o schema associado a esse ID.
+  * O consumidor desserializa a mensagem usando o schema recuperado e processa os dados.
